@@ -1,0 +1,55 @@
+{
+  "time_column": "time_s",
+  "channels": {
+    "battery_mV": {
+      "measurement": "battery_voltage",
+      "source_unit": "mV",
+      "target_unit": "V"
+    },
+    "accel_x_mps2": {
+      "measurement": "accel_x",
+      "source_unit": "m/s^2",
+      "target_unit": "g"
+    },
+    "accel_y_mps2": {
+      "measurement": "accel_y",
+      "source_unit": "m/s^2",
+      "target_unit": "g"
+    },
+    "accel_z_mps2": {
+      "measurement": "accel_z",
+      "source_unit": "m/s^2",
+      "target_unit": "g"
+    },
+    "gyro_x_rad_s": {
+      "measurement": "gyro_x",
+      "source_unit": "rad/s",
+      "target_unit": "deg/s"
+    },
+    "gyro_y_rad_s": {
+      "measurement": "gyro_y",
+      "source_unit": "rad/s",
+      "target_unit": "deg/s"
+    },
+    "gyro_z_rad_s": {
+      "measurement": "gyro_z",
+      "source_unit": "rad/s",
+      "target_unit": "deg/s"
+    },
+    "ppg": {
+      "measurement": "ppg_optical",
+      "source_unit": "normalized",
+      "target_unit": "normalized"
+    },
+    "temperature_c": {
+      "measurement": "skin_temperature",
+      "source_unit": "degC",
+      "target_unit": "degC"
+    },
+    "ecg_impedance_ohm": {
+      "measurement": "ecg_electrode_impedance",
+      "source_unit": "ohm",
+      "target_unit": "kohm"
+    }
+  }
+}
