@@ -5,7 +5,7 @@
 The project was built as a practical manufacturing-test workflow rather than as a notebook demo. It can be used entirely with simulated data, or it can accept measurements exported from another acquisition system.
 
 <p align="center">
-  <img src="assets/weartest_ate_graphical_abstract.png" alt="WearTest-ATE graphical abstract showing input data, standardization, acceptance testing, production analysis, intended users, and project advantages" width="100%">
+  <img src="graphical_abstract.png" alt="WearTest-ATE graphical abstract showing input data, standardization, acceptance testing, production analysis, intended users, and project advantages" width="100%">
 </p>
 
 ## Why I built it
