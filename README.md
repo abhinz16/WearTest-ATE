@@ -1,28 +1,50 @@
-# WearTest ATE
+# WearTest-ATE
 
-WearTest ATE is a desktop manufacturing-test application for wearable health and fitness devices such as fitness trackers, smart bands, and continuous physiological-monitoring products. It is designed to demonstrate how a test engineer can move from raw acquired sensor data to device acceptance, production analytics, tester-health checks, measurement-system analysis, and cycle-time optimization.
+**WearTest-ATE** is a desktop automated test platform for wearable sensor devices. It brings device acceptance testing, acquisition-file import, production metrics, tester-health checks, measurement-system analysis, and cycle-time validation into one application.
 
-The project can run entirely from simulation, but it also accepts external acquisition data. CSV and NI TDMS/LabVIEW data can be normalized into the same internal measurement format before they reach the test engine. New source formats can be added through a small adapter interface without rewriting the core test logic.
+The project was built as a practical manufacturing-test workflow rather than as a notebook demo. It can be used entirely with simulated data, or it can accept measurements exported from another acquisition system.
 
-All engineering limits, station behavior, reference values, GR&R settings, and cycle-time assumptions in this repository are configurable project assumptions. They are not production specifications or factory data from any specific manufacturer.
+<p align="center">
+  <img src="assets/weartest_ate_graphical_abstract.png" alt="WearTest-ATE graphical abstract showing input data, standardization, acceptance testing, production analysis, intended users, and project advantages" width="100%">
+</p>
 
-## What the project demonstrates
+## Why I built it
 
-WearTest ATE covers the main pieces of a small automated test platform:
+A production test system has to do more than return PASS or FAIL. Engineers also need to know whether the tester is healthy, whether measurements are repeatable across stations, why yield is changing, and whether a faster test sequence still catches the defects it is supposed to catch.
 
-- End-of-line PASS/FAIL testing for power, IMU, optical PPG, skin temperature, and optional ECG paths.
-- A single standardized JSONL measurement format used by simulation and imported acquisition data.
-- CSV and NI TDMS/LabVIEW ingestion with channel mapping and unit conversion.
-- CRC32 integrity checking, record sequencing, de-duplication identifiers, and local recovery spooling.
-- User-editable engineering limits and product profiles through INI files.
-- SQLite traceability for device tests, tester-health checks, GR&R studies, and cycle-time studies.
-- Production metrics including true first-pass yield, failure Pareto, rolling FPY, station performance, and recent test history.
-- Golden-unit testing to distinguish a product problem from a drifting test station.
-- Crossed Gage R&R analysis with repeatability, reproducibility, part-to-part variation, %GR&R, ndc, and station bias.
-- Cycle-time optimization that rejects faster sequences when simulated defect coverage degrades.
-- A desktop GUI built for engineering use rather than a notebook or browser workflow.
+WearTest-ATE puts those questions into one workflow. The current project focuses on wearable health and fitness devices with battery/power, inertial sensing, optical PPG, skin-temperature, and optional ECG measurements.
 
-## System flow
+All limits, reference values, station behavior, GR&R settings, and timing assumptions in this repository are project assumptions used for simulation and demonstration. They are not production specifications or factory data from a commercial device manufacturer.
+
+## Who can use it
+
+The current workflow is most useful as a starting point or demonstration platform for:
+
+- manufacturing and automated test engineers
+- quality and validation engineers
+- sensor and wearable-device R&D teams
+- laboratories that need repeatable sensor test workflows
+- engineers working with CSV, NI TDMS, or LabVIEW-exported acquisition data
+
+## What WearTest-ATE does
+
+WearTest-ATE currently supports:
+
+- configurable acceptance testing for battery/power, IMU, optical PPG, temperature, and optional ECG measurements
+- single-product testing or one-click testing across all configured product profiles
+- CSV and NI TDMS/LabVIEW import through a common adapter layer
+- a standardized JSONL measurement representation for downstream processing
+- unit normalization before measurements enter the test engine
+- CRC32 checks, record-order validation, and recovery spooling for accidental data corruption or failed writes
+- SQLite traceability for product tests, tester-health checks, GR&R studies, and cycle-time studies
+- true first-pass yield, rolling FPY, failure Pareto, station performance, and recent test history
+- golden-unit checks for tester bias and station drift
+- batch golden-unit checks across all configured test stations
+- crossed Gage R&R analysis for repeatability and reproducibility
+- cycle-time comparison with defect-coverage validation before a faster sequence is accepted
+- controlled fault injection and simulated production batches when hardware is not available
+
+## How the pieces fit together
 
 ```text
 Acquisition source
@@ -33,36 +55,36 @@ Acquisition source
     |-- Custom adapter
     |
     v
-Source adapter and unit conversion
+Adapter + unit normalization
     |
     v
 Standardized JSONL measurement records
     |
     |-- CRC32 integrity check
-    |-- Record ordering check
+    |-- Sequence validation
     |-- Source metadata
-    |-- Device / station / session traceability
+    |-- Device, station, and session IDs
     |
     v
-Reliable local transport
+Reliable local storage
     |
     |-- Primary destination
-    |-- Recovery spool if primary write fails
+    |-- Recovery spool if the primary write fails
     |
     v
-Manufacturing test engine
+Test and analysis engine
     |
-    |-- Device PASS / FAIL
+    |-- Product PASS / FAIL
     |-- Failure codes
     |-- Golden-unit tester health
-    |-- GR&R
+    |-- Gage R&R
     |-- Cycle-time validation
     |
     v
-SQLite traceability and production dashboard
+SQLite traceability + production dashboard
 ```
 
-## Repository structure
+## Repository layout
 
 ```text
 WearTest-ATE/
@@ -70,7 +92,11 @@ WearTest-ATE/
 |-- run_app.py
 |-- requirements.txt
 |-- README.md
+|-- LICENSE
 |-- .gitignore
+|
+|-- assets/
+|   `-- weartest_ate_graphical_abstract.png
 |
 |-- config/
 |   |-- test_specs.ini
@@ -100,9 +126,9 @@ WearTest-ATE/
     `-- test_project.py
 ```
 
-## Quick start with Anaconda and Spyder
+## Getting started
 
-WearTest uses Python 3.10 or newer syntax. An existing Anaconda environment is fine.
+WearTest-ATE uses Python 3.10 or newer. An existing Anaconda environment works well.
 
 From Anaconda Prompt:
 
@@ -112,79 +138,89 @@ cd PATH_TO/WearTest-ATE
 python -m pip install -r requirements.txt
 ```
 
-To confirm that Spyder is using the same environment, run this in the Spyder console:
+To check which Python interpreter Spyder is using:
 
 ```python
 import sys
 print(sys.executable)
 ```
 
-Open `run_app.py` in Spyder and run it with F5. The launcher adds the project root to the Python path automatically, so the application does not depend on Spyder using a particular working directory.
+Open `run_app.py` in Spyder and run it with F5. The launcher adds the project root to the Python path, so the application does not depend on Spyder using a particular working directory.
 
-The individual `weartest/*.py` modules also use absolute imports and a project-root bootstrap, which avoids the common `attempted relative import with no known parent package` error when files are run directly from Spyder.
+You can also start the application from a terminal:
 
-## Main GUI workspaces
+```bash
+python run_app.py
+```
+
+## Main workspaces
 
 ### Run Device Test
 
-Runs the complete acceptance sequence for one product profile. The current profiles are defined in `config/products.ini` and can be extended without editing the GUI code.
+This page runs the complete acceptance sequence for a selected product profile. Product definitions come from `config/products.ini`, so a new profile can be added without rewriting the GUI.
 
-The user can run one selected product or run all configured product profiles in one batch. Each profile receives its own traceable session.
+You can test one selected product or run every configured product profile as a batch. Each result is stored as its own traceable test session.
 
 ### External Data
 
-Imports data collected by another acquisition system and runs it through the same test engine as simulated data.
+This page imports measurements collected outside WearTest-ATE and sends them through the same test engine used for simulated devices.
 
-The included CSV example intentionally uses non-canonical units:
+The included example demonstrates unit conversion from common acquisition units such as:
 
-- battery voltage in mV
-- acceleration in m/s^2
-- angular rate in rad/s
-- ECG impedance in ohm
+| Measurement | Example source unit | Normalized unit |
+|---|---:|---:|
+| Battery voltage | mV | V |
+| Acceleration | m/s² | g |
+| Angular rate | rad/s | °/s |
+| ECG impedance | Ω | kΩ |
 
-The mapping file converts these into the engineering units expected by the test engine.
+The exact source-channel names and parser strings are defined in `examples/external_device_mapping.json`.
 
 ### Production
 
-The production dashboard reads directly from the SQLite traceability database and shows:
+The production dashboard reads from the SQLite traceability database and summarizes what is happening across devices and stations.
+
+It includes:
 
 - unique devices tested
-- true first-pass yield based only on the first attempt for each DUT
+- true first-pass yield based on the first attempt for each device
 - first-pass failures
-- total test sessions, including retests
+- total sessions, including retests
 - failure Pareto
 - rolling 20-device FPY
 - station-level performance
 - latest tester-health state
 - recent test sessions
 
-The dashboard is scrollable and can be refreshed manually. Refreshing re-queries SQLite and redraws the KPI cards, tables, Pareto chart, and FPY trend.
+The **Refresh dashboard** action re-queries SQLite and redraws the KPI cards, tables, Pareto chart, and FPY trend. It does not rely on a cached copy of the production data.
 
 ### Data Integrity
 
-Shows whether the most recent acquisition passed the standardized-record integrity checks. WearTest uses CRC32 to detect accidental record corruption during transport or storage.
+Every standardized measurement record carries a CRC32 checksum. WearTest-ATE recalculates that checksum when the record is read so accidental corruption can be detected before the measurement is trusted.
 
-CRC32 is an integrity check, not a cryptographic security mechanism. It detects accidental changes but is not intended to authenticate a sender or defend against deliberate tampering.
+CRC32 is used here as an integrity check. It is not intended as a cryptographic authentication mechanism.
 
 ### Test Limits
 
-Displays the active engineering limits from `config/test_specs.ini`. The file can be edited with a normal text editor and reloaded from the GUI without changing Python code.
+Acceptance limits are read from `config/test_specs.ini`. They can be edited with a normal text editor and reloaded without changing Python source code.
 
 ### Tester Health
 
-Runs a known-good golden reference through one selected station or all configured stations. The result evaluates the tester rather than the product.
+A production device answers the question, **"Is this product good?"** A golden unit answers a different question, **"Is this tester still measuring correctly?"**
 
-For each metric, WearTest compares measured and reference values, calculates tester bias, and reports one of three states:
+A golden unit is a known-good reference device with expected measurements. WearTest-ATE runs that reference through a selected station, compares the measured values with the known values, and calculates tester bias.
 
-- Healthy
-- Warning
-- Needs attention
+Station health is reported as:
 
-The current simulation includes gradual station drift so the tester-health logic can be demonstrated without physical ATE hardware.
+- **Healthy**
+- **Warning**
+- **Needs attention**
+
+The simulation includes progressive station drift so this behavior can be exercised without physical ATE hardware. You can run one station at a time or check all configured stations in one batch.
 
 ### Measurement System
 
-Runs a crossed Gage R&R study across multiple reference units, stations, and repeated trials.
+The Measurement System page runs a crossed Gage R&R study across multiple reference units, test stations, and repeated trials.
 
 The analysis reports:
 
@@ -192,35 +228,39 @@ The analysis reports:
 - station-to-station reproducibility
 - part-by-station contribution
 - total GR&R
-- %GR&R
+- GR&R as a percentage of study variation
 - part-to-part variation
 - total study variation
-- number of distinct categories, ndc
-- mean bias for every station
+- number of distinct categories, or ndc
+- mean bias for each station
 
-The default configuration uses 5 reference units, 3 stations, and 3 trials per station, for 45 measurements.
+The default study uses 5 reference units, 3 stations, and 3 trials per station, giving 45 measurements.
 
 ### Cycle Time
 
-Compares a baseline test sequence with faster candidate sequences. Candidate waveform windows are actually shortened before the same acceptance engine evaluates them.
+This page compares a baseline sequence with faster candidate sequences. The goal is not simply to find the shortest test. A candidate is only accepted if it still meets the configured defect-detection and false-reject guardrails.
 
-A faster sequence is validated only if it meets all configured quality guardrails for defect-detection retention, escaped defects, and false-reject change.
+The application shortens the simulated acquisition windows, runs the same acceptance logic, and then compares the result against the baseline over a validation population.
 
-The throughput value is an idealized single-station estimate:
+Idealized throughput is calculated as:
 
 ```text
-units per hour = 3600 / estimated cycle time
+throughput = 3600 s/h ÷ estimated cycle time in s
 ```
 
-It does not include loading, unloading, operator time, maintenance, downtime, or line balancing.
+This is a single-station estimate. It does not include operator handling, loading and unloading, maintenance, downtime, or line balancing.
 
 ### Simulation
 
-Provides controlled fault injection and demo-batch generation for development without hardware. Batch generation is incremental and non-blocking, with visible progress, file counts, current stage, and a Cancel action.
+The Simulation page makes it possible to exercise the application without hardware. It supports controlled fault injection and production-batch generation with visible progress and cancellation.
+
+This is useful for testing the analysis workflow before connecting a real acquisition system.
 
 ## Standardized measurement records
 
-After ingestion, every scalar or waveform becomes a `MeasurementRecord`. Important fields include:
+After ingestion, a scalar measurement or waveform is represented by a `MeasurementRecord`. The record contains the measurement itself plus the metadata needed to trace where it came from.
+
+Important fields include:
 
 ```text
 device_id
@@ -240,104 +280,71 @@ record_id
 checksum_crc32
 ```
 
-This boundary is what lets CSV, TDMS, simulation, and future data sources share the same downstream test engine.
+Using one measurement contract means the acceptance engine does not need separate logic for CSV, TDMS, simulation, or each future data source.
 
-## External acquisition example
+## Bringing in another data format
 
-The repository includes:
+`weartest/adapters.py` defines the adapter interface. A new converter only needs to read its source format and return standardized `MeasurementRecord` objects.
 
-```text
-examples/external_device_example.csv
-examples/external_device_mapping.json
-```
-
-The mapping file describes what each source channel means and how its unit should be converted. For example:
-
-```json
-"accel_x_mps2": {
-  "measurement": "accel_x",
-  "source_unit": "m/s^2",
-  "target_unit": "g"
-}
-```
-
-The GUI uses the mapping to normalize the file and then evaluates it using the same acceptance logic used for simulated devices.
-
-## Adding another acquisition format
-
-`weartest/adapters.py` defines the `DataAdapter` interface. A custom converter only needs to turn the source data into a list of standardized `MeasurementRecord` objects.
-
-A starting template is provided at:
+A template is included here:
 
 ```text
 user_adapters/_example_adapter.py
 ```
 
-Copy the file, remove the leading underscore, give the adapter a unique format name and file extension, and implement its `convert()` method. WearTest discovers user adapters at startup.
+Copy the template, remove the leading underscore from the filename, give the adapter a unique format name and extension, and implement its `convert()` method. User adapters are discovered when the application starts.
 
-The manufacturing test engine does not need to be changed for every new file format.
+This keeps file-format details out of the manufacturing acceptance logic.
 
 ## Configuration files
 
-### `config/test_specs.ini`
+| File | What it controls |
+|---|---|
+| `config/test_specs.ini` | Product acceptance limits for battery, IMU, optical sensing, temperature, and ECG impedance |
+| `config/products.ini` | Available product configurations and whether ECG is required |
+| `config/golden_units.ini` | Golden-unit references, tester-bias limits, warning thresholds, and simulated station drift |
+| `config/grr_study.ini` | GR&R metric, number of reference units, repeated trials, decision bands, and repeatability assumptions |
+| `config/cycle_time.ini` | Baseline and candidate sequences, timing assumptions, validation population, and quality guardrails |
 
-Product acceptance limits for battery, accelerometer, gyroscope, optical sensing, temperature, and ECG impedance.
+## Example simulation results
 
-### `config/products.ini`
+These results come from the default project configuration and deterministic simulation seeds. They are included so the repository has reproducible examples, not as claims about a real production line.
 
-Defines available product configurations and whether ECG is required.
+### Golden-unit behavior
 
-### `config/golden_units.ini`
+The intentionally stable station remains Healthy during repeated reference checks. The intentionally drifting station progresses from Healthy to Warning and then to Needs attention as its simulated measurement bias grows beyond the configured tester limit.
 
-Contains golden-unit reference values, tester-bias limits, warning thresholds, and simulated station drift.
+### Gage R&R
 
-### `config/grr_study.ini`
+The default Accelerometer X study uses 5 reference units, 3 stations, and 3 repeated trials per station.
 
-Controls the default GR&R metric, number of reference units, trials, decision bands, and repeatability assumptions.
+| Result | Value |
+|---|---:|
+| Measurements | 45 |
+| GR&R | 19.3% |
+| Repeatability, σ | 0.00265 g |
+| Reproducibility, σ | 0.00569 g |
+| Part-to-part variation, σ | 0.03193 g |
+| ndc | 7 |
+| Assessment | Review |
 
-### `config/cycle_time.ini`
-
-Defines baseline and candidate test sequences, timing assumptions, validation population, and quality guardrails.
-
-## Example simulated results
-
-These numbers are produced from the current default configuration and deterministic simulation seeds. They are demonstration results only.
-
-### Golden-unit tester health
-
-The intentionally stable station remains Healthy during repeated checks. Under the default simulated drift model, the intentionally drifting station progresses from Healthy to Warning and eventually Needs attention as its accelerometer bias exceeds the configured tester limit.
-
-### GR&R
-
-For the default Accelerometer X study with 5 reference units, 3 stations, and 3 trials per station:
-
-```text
-Measurements                  45
-% GR&R                       19.3%
-Repeatability sigma        0.00265 g
-Reproducibility sigma      0.00569 g
-Part-to-part sigma         0.03193 g
-ndc                              7
-Assessment                    Review
-```
-
-The result is intentionally not perfect. It gives the application measurable repeatability and station-to-station variation to diagnose.
+The simulated measurement system is intentionally not perfect. That gives the analysis enough station-to-station and repeated-measurement variation to diagnose.
 
 ### Cycle-time validation
 
-With the current default timing and validation assumptions:
+| Strategy | Estimated cycle time | Result |
+|---|---:|---|
+| Baseline sequential | 23.3 s | Baseline |
+| Parallel acquisition | 17.3 s | Validated |
+| Balanced | 12.3 s | Validated |
+| Aggressive | 7.3 s | Validated |
+| Too short | 6.3 s | Rejected |
 
-```text
-Baseline sequential       23.3 s   about 155 units/hour
-Parallel acquisition      17.3 s   validated
-Balanced                  12.3 s   validated
-Aggressive                 7.3 s   validated
-Too short                  6.3 s   rejected
-```
+The 7.3 s candidate retains 100% simulated defect detection in the configured validation population and reduces modeled cycle time by about 68.7% relative to the 23.3 s baseline.
 
-The Aggressive sequence retains 100% simulated defect detection in the configured validation population and reduces estimated cycle time by about 68.7% relative to the baseline.
+The 6.3 s candidate is faster, but it is rejected because simulated defect-detection retention falls to about 85.7% and the escaped-defect rate rises to 14.3%. The optimizer therefore favors the fastest **validated** sequence rather than the shortest sequence overall.
 
-The still-faster Too short sequence is rejected because simulated defect-detection retention falls to about 85.7%, with a 14.3% escaped-defect rate. The optimizer therefore does not simply select the shortest sequence.
+For reference, the idealized single-station throughput changes from about **155 units/h** at 23.3 s per device to about **493 units/h** at 7.3 s per device.
 
 ## Running the tests
 
@@ -347,57 +354,82 @@ From the project root:
 python -m pytest -q
 ```
 
-The test suite covers:
+The regression suite covers the main engineering paths, including:
 
 - CRC corruption detection
 - unit conversion
-- normal and faulty DUT acceptance
+- normal and faulty device acceptance
 - external CSV import
-- reliable fallback storage
+- fallback storage
 - TDMS import when `nptdms` is available
-- true first-pass yield and retest behavior
+- first-pass yield and retest behavior
 - rolling FPY
 - golden-unit drift detection
 - configurable product profiles
-- crossed GR&R calculations and persistence
+- crossed Gage R&R calculations and persistence
 - cycle-time optimization and coverage loss
 
 ## Runtime data
 
-WearTest creates a local `runtime/` directory when the application runs. It contains the SQLite traceability database, normalized session files, and transport/recovery data.
+The application creates a local `runtime/` directory while it is running. This contains the SQLite traceability database, normalized session files, and transport or recovery data.
 
-Runtime outputs are ignored by Git so local test history does not accidentally become part of the repository.
+`runtime/` is ignored by Git so local test history does not become part of the repository.
 
-## Design choices
+## A few design choices
 
-A few choices are deliberate:
+**Why JSONL?**  
+It is easy to inspect, stream, validate, and generate from common acquisition tools. The measurement contract is separate from the encoding, so a higher-throughput transport could replace JSONL later without changing the test logic.
 
-- **JSONL instead of a proprietary binary interchange format:** easy to inspect, stream, validate, and convert from common acquisition tools. A high-throughput production system could later replace the transport encoding without changing the measurement contract.
-- **SQLite for the portfolio application:** zero server setup and enough structure to demonstrate traceability, retests, station history, GR&R, and optimization studies.
-- **INI configuration:** engineers can change limits and study settings without editing Python code.
-- **Separate adapters and test logic:** source-file details stay outside the manufacturing acceptance engine.
-- **UTC storage with local-time display:** traceability timestamps remain unambiguous while the GUI stays readable for the operator.
-- **Golden-unit checks separate from DUT acceptance:** a known-good reference failure points toward the tester rather than automatically blaming the product.
+**Why SQLite?**  
+For a desktop portfolio application it provides structured traceability without requiring a database server. It is enough to demonstrate retests, station history, tester checks, GR&R studies, and optimization studies.
 
-## Project boundaries
+**Why INI files for limits and studies?**  
+Test limits and study settings are engineering inputs. Keeping them outside Python makes the workflow easier to adjust and review.
 
-This repository is a manufacturing-test software demonstration, not a medical-device validation package or a production-ready factory release.
+**Why keep adapters separate from the test engine?**  
+A CSV column name or TDMS channel path should not determine how acceptance logic is written. Adapters handle the source format, while the test engine works with normalized measurements.
 
-- Sensor measurements are simulated unless the user imports external acquisition data.
-- Acceptance limits and station drift are configurable project assumptions.
-- GR&R reference populations are simulated.
-- Cycle-time values are modeled rather than measured on a real production line.
-- CRC32 protects against accidental corruption, not malicious alteration.
-- Hardware communication, MES integration, access control, calibration certificates, and regulated validation would require additional work for a deployed system.
+**Why store UTC but display local time?**  
+UTC keeps traceability timestamps unambiguous. Local display time is easier for an operator to read during a test session.
+
+**Why use golden units?**  
+When several products suddenly begin failing, the problem may be the products or the tester. A known-good reference gives the station a repeatable check and helps catch tester drift before it is mistaken for product failure.
+
+## Current project boundaries
+
+WearTest-ATE is an engineering demonstration, not a released factory test system or a medical-device validation package.
+
+The current version has a few deliberate boundaries:
+
+- measurements are simulated unless external acquisition data is imported
+- acceptance limits and station drift are configurable project assumptions
+- GR&R reference populations are simulated
+- cycle-time values are modeled rather than measured on a physical line
+- CRC32 protects against accidental corruption, not deliberate tampering
+- hardware drivers, MES integration, operator authentication, calibration certificates, and regulated validation would be additional deployment work
 
 ## Technology
 
-- Python
-- Tkinter / ttk
-- NumPy
-- Pandas
-- Matplotlib
-- SQLite
-- npTDMS
-- pytest
+Python, Tkinter/ttk, NumPy, Pandas, Matplotlib, SQLite, npTDMS, and pytest.
 
+## License
+
+WearTest-ATE is released under the **MIT License**. See [`LICENSE`](LICENSE) for the full license text.
+
+## Citation
+
+If you use WearTest-ATE in academic work, teaching material, a technical report, or another public project, you can cite the repository as:
+
+**Abraham, A. (2026). _WearTest-ATE: Automated manufacturing test platform for wearable sensor devices_ [Computer software]. GitHub. https://github.com/abhinz16/WearTest-ATE**
+
+BibTeX:
+
+```bibtex
+@software{abraham2026weartestate,
+  author  = {Abhinav Abraham},
+  title   = {WearTest-ATE: Automated Manufacturing Test Platform for Wearable Sensor Devices},
+  year    = {2026},
+  url     = {https://github.com/abhinz16/WearTest-ATE},
+  license = {MIT}
+}
+```
