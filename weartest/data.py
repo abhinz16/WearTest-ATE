@@ -336,7 +336,7 @@ def read_jsonl(
     """Read, verify, de-duplicate, and order-check a WearTest JSONL file.
 
     Args:
-        path: Source WearTest Exchange JSONL file.
+        path: Source standardized JSONL file.
         verify_checksum: Whether every record CRC32 must be validated.
 
     Returns:
@@ -387,6 +387,10 @@ def read_jsonl(
 _STANDARD_UNITS = {
     "v": "V",
     "mv": "mV",
+    "a": "A",
+    "ma": "mA",
+    "ua": "uA",
+    "µa": "uA",
     "g": "g",
     "m/s^2": "m/s^2",
     "m/s2": "m/s^2",
@@ -400,6 +404,12 @@ _STANDARD_UNITS = {
     "kω": "kohm",
     "ohm": "ohm",
     "ω": "ohm",
+    "hz": "Hz",
+    "khz": "kHz",
+    "dbm": "dBm",
+    "%": "%",
+    "percent": "%",
+    "fraction": "fraction",
     "normalized": "normalized",
 }
 
@@ -452,6 +462,29 @@ def convert_values(values: Iterable[float], source_unit: str, target_unit: str) 
         return [value / 1000.0 for value in data]
     if source == "V" and target == "mV":
         return [value * 1000.0 for value in data]
+
+
+    # Current conversions.
+    if source == "A" and target == "mA":
+        return [value * 1000.0 for value in data]
+    if source == "mA" and target == "A":
+        return [value / 1000.0 for value in data]
+    if source == "uA" and target == "mA":
+        return [value / 1000.0 for value in data]
+    if source == "mA" and target == "uA":
+        return [value * 1000.0 for value in data]
+
+    # Frequency conversions.
+    if source == "Hz" and target == "kHz":
+        return [value / 1000.0 for value in data]
+    if source == "kHz" and target == "Hz":
+        return [value * 1000.0 for value in data]
+
+    # Ratio conversions.
+    if source == "fraction" and target == "%":
+        return [value * 100.0 for value in data]
+    if source == "%" and target == "fraction":
+        return [value / 100.0 for value in data]
 
     # Motion conversions.
     if source == "m/s^2" and target == "g":

@@ -173,7 +173,7 @@ def load_grr_configuration(path: str | Path | None = None) -> GrrStudyConfigurat
     if not config_path.exists():
         raise FileNotFoundError(f"GR&R configuration file not found: {config_path}")
 
-    parser = ConfigParser()
+    parser = ConfigParser(interpolation=None)
     parser.read(config_path, encoding="utf-8")
 
     try:

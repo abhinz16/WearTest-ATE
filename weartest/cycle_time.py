@@ -54,10 +54,14 @@ class CycleTimeConfiguration:
         max_escape_rate_percent: Maximum allowed candidate escaped-defect rate.
         max_false_reject_increase_pp: Maximum false-reject increase in percentage points.
         communication_s: Fixed communication/setup time.
-        battery_s: Fixed battery-check time.
+        battery_s: Fixed battery-voltage check time.
+        charging_power_s: Fixed charging and operating-current test time.
         temperature_s: Fixed temperature-check time.
-        ecg_s: Fixed ECG-path check time when ECG is required.
-        record_and_save_s: Fixed disposition and traceability write time.
+        ble_rf_s: Fixed BLE/RF functional-test time.
+        haptic_s: Fixed haptic verification time.
+        ecg_impedance_s: Fixed ECG electrode-impedance time.
+        ecg_waveform_s: Fixed injected-ECG waveform verification time.
+        record_and_save_s: Fixed disposition and traceability-write time.
         baseline: Reference sequential test strategy.
         candidates: Faster strategies evaluated against the baseline.
     """
@@ -70,12 +74,15 @@ class CycleTimeConfiguration:
     max_false_reject_increase_pp: float
     communication_s: float
     battery_s: float
+    charging_power_s: float
     temperature_s: float
-    ecg_s: float
+    ble_rf_s: float
+    haptic_s: float
+    ecg_impedance_s: float
+    ecg_waveform_s: float
     record_and_save_s: float
     baseline: CycleCandidate
     candidates: tuple[CycleCandidate, ...]
-
 
 @dataclass
 class CandidateValidationCounts:
@@ -227,7 +234,7 @@ def load_cycle_time_configuration(
     """Load cycle-time assumptions and candidate strategies from INI.
 
     Args:
-        path: Optional configuration path. Defaults to ``config/cycle_time.ini``.
+        path: Optional configuration path.
 
     Returns:
         Validated cycle-time configuration.
@@ -246,84 +253,98 @@ def load_cycle_time_configuration(
     baseline = _candidate_from_section(parser, "baseline", key="baseline", baseline=True)
     candidates: list[CycleCandidate] = []
     for section in parser.sections():
-        if not section.lower().startswith("candidate:"):
-            continue
-        name = section.split(":", 1)[1].strip()
-        key = "".join(ch.lower() if ch.isalnum() else "_" for ch in name).strip("_")
-        candidates.append(_candidate_from_section(parser, section, key=key, baseline=False))
+        if section.lower().startswith("candidate:"):
+            name = section.split(":", 1)[1].strip()
+            key = "".join(ch.lower() if ch.isalnum() else "_" for ch in name).strip("_")
+            candidates.append(_candidate_from_section(parser, section, key=key, baseline=False))
 
     configuration = CycleTimeConfiguration(
         default_product=parser.get("study", "default_product").strip(),
         validation_devices=parser.getint("study", "validation_devices"),
         rng_seed=parser.getint("study", "rng_seed"),
-        min_detection_retention_percent=parser.getfloat(
-            "study", "min_detection_retention_percent"
-        ),
+        min_detection_retention_percent=parser.getfloat("study", "min_detection_retention_percent"),
         max_escape_rate_percent=parser.getfloat("study", "max_escape_rate_percent"),
-        max_false_reject_increase_pp=parser.getfloat(
-            "study", "max_false_reject_increase_pp"
-        ),
+        max_false_reject_increase_pp=parser.getfloat("study", "max_false_reject_increase_pp"),
         communication_s=parser.getfloat("fixed_time", "communication_s"),
         battery_s=parser.getfloat("fixed_time", "battery_s"),
+        charging_power_s=parser.getfloat("fixed_time", "charging_power_s"),
         temperature_s=parser.getfloat("fixed_time", "temperature_s"),
-        ecg_s=parser.getfloat("fixed_time", "ecg_s"),
+        ble_rf_s=parser.getfloat("fixed_time", "ble_rf_s"),
+        haptic_s=parser.getfloat("fixed_time", "haptic_s"),
+        ecg_impedance_s=parser.getfloat("fixed_time", "ecg_impedance_s"),
+        ecg_waveform_s=parser.getfloat("fixed_time", "ecg_waveform_s"),
         record_and_save_s=parser.getfloat("fixed_time", "record_and_save_s"),
         baseline=baseline,
         candidates=tuple(candidates),
     )
-
     if configuration.validation_devices < 8:
         raise ValueError("Cycle-time validation should use at least 8 devices.")
     if not configuration.candidates:
-        raise ValueError("At least one [candidate:...] cycle-time strategy is required.")
-    for value in (
+        raise ValueError("At least one cycle-time candidate is required.")
+    fixed_values = (
         configuration.communication_s,
         configuration.battery_s,
+        configuration.charging_power_s,
         configuration.temperature_s,
-        configuration.ecg_s,
+        configuration.ble_rf_s,
+        configuration.haptic_s,
+        configuration.ecg_impedance_s,
+        configuration.ecg_waveform_s,
         configuration.record_and_save_s,
-    ):
-        if value < 0:
-            raise ValueError("Fixed cycle-time components cannot be negative.")
+    )
+    if any(value < 0.0 for value in fixed_values):
+        raise ValueError("Fixed cycle-time components cannot be negative.")
     return configuration
-
 
 def estimate_cycle_seconds(
     config: CycleTimeConfiguration,
     candidate: CycleCandidate,
     *,
-    include_ecg: bool,
+    include_spo2: bool = True,
+    include_power_current: bool = True,
+    include_ble_rf: bool = True,
+    include_haptic: bool = True,
+    include_ecg: bool = False,
+    include_ecg_waveform: bool = False,
 ) -> float:
-    """Estimate one station cycle time from acquisition windows and overlap.
+    """Estimate station cycle time from feature content and acquisition overlap.
 
     Args:
         config: Fixed timing assumptions and candidate definitions.
         candidate: Sequence to evaluate.
-        include_ecg: Whether the product profile requires an ECG path check.
+        include_spo2: Whether SpO₂ optical verification is enabled.
+        include_power_current: Whether charging/current testing is enabled.
+        include_ble_rf: Whether BLE/RF functional testing is enabled.
+        include_haptic: Whether haptic verification is enabled.
+        include_ecg: Whether ECG impedance is enabled.
+        include_ecg_waveform: Whether ECG waveform verification is enabled.
 
     Returns:
         Estimated cycle time in seconds.
     """
 
-    motion_time = (
-        candidate.imu_window_s
-        if candidate.parallel_motion
-        else 2.0 * candidate.imu_window_s
-    )
+    motion_time = candidate.imu_window_s if candidate.parallel_motion else 2.0 * candidate.imu_window_s
+    optical_time = candidate.ppg_window_s
+    # Red/IR SpO₂ channels are modeled as sharing the same optical acquisition window.
+    if not include_spo2:
+        optical_time = candidate.ppg_window_s
     optical_temperature_time = (
-        max(candidate.ppg_window_s, config.temperature_s)
+        max(optical_time, config.temperature_s)
         if candidate.parallel_optical_temperature
-        else candidate.ppg_window_s + config.temperature_s
+        else optical_time + config.temperature_s
     )
     return (
         config.communication_s
         + config.battery_s
+        + (config.charging_power_s if include_power_current else 0.0)
         + motion_time
         + optical_temperature_time
-        + (config.ecg_s if include_ecg else 0.0)
+        + (config.ble_rf_s if include_ble_rf else 0.0)
+        + (config.haptic_s if include_haptic else 0.0)
+        + (config.ecg_impedance_s if include_ecg else 0.0)
+        + (config.ecg_waveform_s if include_ecg_waveform else 0.0)
         + config.record_and_save_s
     )
-
 
 def truncate_records_for_candidate(
     records: list[MeasurementRecord],
@@ -344,7 +365,7 @@ def truncate_records_for_candidate(
         duration_s: float | None = None
         if record.measurement.startswith("accel_") or record.measurement.startswith("gyro_"):
             duration_s = candidate.imu_window_s
-        elif record.measurement == "ppg_optical":
+        elif record.measurement in {"ppg_optical", "spo2_red_optical", "spo2_ir_optical"}:
             duration_s = candidate.ppg_window_s
 
         if duration_s is None or record.sample_rate_hz is None:
@@ -357,14 +378,27 @@ def truncate_records_for_candidate(
     return output
 
 
-def validation_fault_profiles(*, include_ecg: bool) -> tuple[FaultProfile, ...]:
-    """Return a balanced set of healthy and single-fault validation cases.
+def validation_fault_profiles(
+    *,
+    include_spo2: bool = True,
+    include_power_current: bool = True,
+    include_ble_rf: bool = True,
+    include_haptic: bool = True,
+    include_ecg: bool = False,
+    include_ecg_waveform: bool = False,
+) -> tuple[FaultProfile, ...]:
+    """Return healthy and single-fault cases enabled by one product profile.
 
     Args:
-        include_ecg: Whether ECG-specific faults apply to the selected product.
+        include_spo2: Include SpO₂ optical faults.
+        include_power_current: Include charging/current faults.
+        include_ble_rf: Include BLE/RF faults.
+        include_haptic: Include haptic faults.
+        include_ecg: Include ECG impedance fault.
+        include_ecg_waveform: Include ECG waveform distortion fault.
 
     Returns:
-        Healthy profile followed by one profile for each supported defect mode.
+        Healthy profile followed by one profile for each enabled defect mode.
     """
 
     profiles = [
@@ -376,10 +410,33 @@ def validation_fault_profiles(*, include_ecg: bool) -> tuple[FaultProfile, ...]:
         FaultProfile(ppg_saturation=True),
         FaultProfile(skin_temp_offset=True),
     ]
+    if include_power_current:
+        profiles.extend(
+            (
+                FaultProfile(charging_current_low=True),
+                FaultProfile(idle_current_high=True),
+                FaultProfile(active_current_high=True),
+            )
+        )
+    if include_spo2:
+        profiles.extend(
+            (
+                FaultProfile(spo2_low_snr=True),
+                FaultProfile(spo2_ratio_error=True),
+                FaultProfile(spo2_saturation=True),
+            )
+        )
+    if include_ble_rf:
+        profiles.append(FaultProfile(ble_rf_fault=True))
+    if include_haptic:
+        profiles.extend(
+            (FaultProfile(haptic_weak=True), FaultProfile(haptic_frequency_shift=True))
+        )
     if include_ecg:
         profiles.append(FaultProfile(ecg_high_impedance=True))
+    if include_ecg_waveform:
+        profiles.append(FaultProfile(ecg_waveform_distortion=True))
     return tuple(profiles)
-
 
 
 def fault_profile_label(profile: FaultProfile) -> str:
@@ -394,38 +451,38 @@ def fault_profile_label(profile: FaultProfile) -> str:
 
     labels = (
         (profile.battery_low, "low battery"),
+        (profile.charging_current_low, "low charging current"),
+        (profile.idle_current_high, "high idle current"),
+        (profile.active_current_high, "high active current"),
         (profile.accel_bias, "accelerometer bias"),
         (profile.gyro_bias, "gyroscope bias"),
-        (profile.ppg_low_snr, "low optical SNR"),
-        (profile.ppg_saturation, "optical saturation"),
+        (profile.ppg_low_snr, "low PPG SNR"),
+        (profile.ppg_saturation, "PPG saturation"),
+        (profile.spo2_low_snr, "low SpO2 optical SNR"),
+        (profile.spo2_ratio_error, "SpO2 red/IR ratio error"),
+        (profile.spo2_saturation, "SpO2 optical saturation"),
         (profile.skin_temp_offset, "temperature offset"),
+        (profile.ble_rf_fault, "BLE/RF fault"),
+        (profile.haptic_weak, "weak haptic motor"),
+        (profile.haptic_frequency_shift, "haptic frequency shift"),
         (profile.ecg_high_impedance, "high ECG impedance"),
+        (profile.ecg_waveform_distortion, "ECG waveform distortion"),
     )
     active = [label for enabled, label in labels if enabled]
     return ", ".join(active) if active else "known-good device"
 
+
 def is_faulty(profile: FaultProfile) -> bool:
-    """Return whether a fault profile contains any intentionally injected defect.
+    """Return whether a profile contains any intentionally injected defect.
 
     Args:
-        profile: Synthetic fault configuration used for one validation device.
+        profile: Synthetic fault configuration.
 
     Returns:
         True when at least one defect flag is enabled.
     """
 
-    return any(
-        (
-            profile.battery_low,
-            profile.accel_bias,
-            profile.gyro_bias,
-            profile.ppg_low_snr,
-            profile.ppg_saturation,
-            profile.skin_temp_offset,
-            profile.ecg_high_impedance,
-        )
-    )
-
+    return any(vars(profile).values())
 
 def _result_from_counts(
     *,
@@ -434,7 +491,12 @@ def _result_from_counts(
     counts: CandidateValidationCounts,
     baseline_cycle_seconds: float,
     baseline_false_reject_rate: float,
+    include_spo2: bool,
+    include_power_current: bool,
+    include_ble_rf: bool,
+    include_haptic: bool,
     include_ecg: bool,
+    include_ecg_waveform: bool,
 ) -> CycleCandidateResult:
     """Convert accumulated validation counts into one candidate result.
 
@@ -444,13 +506,27 @@ def _result_from_counts(
         counts: Accumulated baseline/candidate outcomes.
         baseline_cycle_seconds: Reference cycle time in seconds.
         baseline_false_reject_rate: Reference false-reject percentage.
-        include_ecg: Whether the selected product includes ECG.
+        include_spo2: Whether the selected product includes SpO₂ verification.
+        include_power_current: Whether charging/current testing is included.
+        include_ble_rf: Whether BLE/RF testing is included.
+        include_haptic: Whether haptic verification is included.
+        include_ecg: Whether ECG impedance is included.
+        include_ecg_waveform: Whether ECG waveform verification is included.
 
     Returns:
         Calculated candidate metrics and validation decision.
     """
 
-    cycle_seconds = estimate_cycle_seconds(config, candidate, include_ecg=include_ecg)
+    cycle_seconds = estimate_cycle_seconds(
+        config,
+        candidate,
+        include_spo2=include_spo2,
+        include_power_current=include_power_current,
+        include_ble_rf=include_ble_rf,
+        include_haptic=include_haptic,
+        include_ecg=include_ecg,
+        include_ecg_waveform=include_ecg_waveform,
+    )
     units_per_hour = 3600.0 / cycle_seconds if cycle_seconds > 0 else 0.0
     reduction = 100.0 * (baseline_cycle_seconds - cycle_seconds) / baseline_cycle_seconds
 
@@ -504,7 +580,12 @@ def finalize_cycle_time_study(
     *,
     config: CycleTimeConfiguration,
     product_name: str,
-    include_ecg: bool,
+    include_spo2: bool = True,
+    include_power_current: bool = True,
+    include_ble_rf: bool = True,
+    include_haptic: bool = True,
+    include_ecg: bool = False,
+    include_ecg_waveform: bool = False,
     counts_by_key: dict[str, CandidateValidationCounts],
 ) -> CycleTimeStudyResult:
     """Calculate candidate metrics and choose the fastest validated sequence.
@@ -512,8 +593,13 @@ def finalize_cycle_time_study(
     Args:
         config: Timing assumptions and validation guardrails.
         product_name: Product profile used in the simulation.
-        include_ecg: Whether the product requires ECG.
-        counts_by_key: Validation counters keyed by candidate key, including baseline.
+        include_spo2: Whether SpO₂ optical verification is enabled.
+        include_power_current: Whether charging/current testing is enabled.
+        include_ble_rf: Whether BLE/RF testing is enabled.
+        include_haptic: Whether haptic verification is enabled.
+        include_ecg: Whether ECG impedance is enabled.
+        include_ecg_waveform: Whether ECG waveform verification is enabled.
+        counts_by_key: Validation counters keyed by candidate key.
 
     Returns:
         Completed cycle-time study with the recommended strategy.
@@ -522,8 +608,16 @@ def finalize_cycle_time_study(
     if "baseline" not in counts_by_key:
         raise ValueError("Cycle-time results require baseline validation counts.")
 
+    feature_kwargs = {
+        "include_spo2": include_spo2,
+        "include_power_current": include_power_current,
+        "include_ble_rf": include_ble_rf,
+        "include_haptic": include_haptic,
+        "include_ecg": include_ecg,
+        "include_ecg_waveform": include_ecg_waveform,
+    }
     baseline_counts = counts_by_key["baseline"]
-    baseline_cycle = estimate_cycle_seconds(config, config.baseline, include_ecg=include_ecg)
+    baseline_cycle = estimate_cycle_seconds(config, config.baseline, **feature_kwargs)
     baseline_false_reject_rate = (
         100.0 * baseline_counts.baseline_false_rejects / baseline_counts.healthy_devices
         if baseline_counts.healthy_devices
@@ -535,9 +629,8 @@ def finalize_cycle_time_study(
         counts=baseline_counts,
         baseline_cycle_seconds=baseline_cycle,
         baseline_false_reject_rate=baseline_false_reject_rate,
-        include_ecg=include_ecg,
+        **feature_kwargs,
     )
-
     candidate_results = tuple(
         _result_from_counts(
             config=config,
@@ -545,11 +638,10 @@ def finalize_cycle_time_study(
             counts=counts_by_key[candidate.key],
             baseline_cycle_seconds=baseline_cycle,
             baseline_false_reject_rate=baseline_false_reject_rate,
-            include_ecg=include_ecg,
+            **feature_kwargs,
         )
         for candidate in config.candidates
     )
-
     eligible = [baseline_result] + [result for result in candidate_results if result.validated]
     recommended = min(eligible, key=lambda result: result.cycle_seconds)
     return CycleTimeStudyResult(

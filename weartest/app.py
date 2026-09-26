@@ -2822,7 +2822,7 @@ class WearTestApp(tk.Tk):
         tk.Label(
             note,
             text=(
-                "Cycle times are configurable simulation assumptions, not measured WHOOP factory times. "
+                "Cycle times are configurable simulation assumptions, not measured factory times. "
                 "The throughput value is an idealized single-station estimate (3600 / cycle time) and does not include line balancing, operator handling, downtime, or maintenance."
             ),
             bg=self.PANEL_3, fg=self.MUTED, font=(self.font_family, 10),
@@ -2860,7 +2860,7 @@ class WearTestApp(tk.Tk):
             "validation_devices": validation_devices,
             "profile": profile,
             "simulator": WearableSimulator(rng_seed=self.cycle_time_config.rng_seed),
-            "fault_profiles": validation_fault_profiles(include_ecg=profile.include_ecg),
+            "fault_profiles": validation_fault_profiles(**profile.simulator_options()),
             "candidates": candidates,
             "counts": {candidate.key: CandidateValidationCounts() for candidate in candidates},
         }
@@ -2896,9 +2896,11 @@ class WearTestApp(tk.Tk):
             device_id,
             "ATE-CYCLE",
             faults=fault,
-            include_ecg=profile.include_ecg,
+            **profile.simulator_options(),
         )
-        baseline_disposition = self.engine.evaluate(records, require_ecg=profile.include_ecg)
+        baseline_disposition = self.engine.evaluate(
+            records, **profile.evaluation_requirements()
+        )
         baseline_failed = not baseline_disposition.passed
         defective = is_faulty(fault)
 
@@ -2909,8 +2911,7 @@ class WearTestApp(tk.Tk):
                 else truncate_records_for_candidate(records, candidate)
             )
             disposition = self.engine.evaluate(
-                candidate_records,
-                require_ecg=profile.include_ecg,
+                candidate_records, **profile.evaluation_requirements()
             )
             state["counts"][candidate.key].record(
                 defective=defective,
@@ -2959,7 +2960,7 @@ class WearTestApp(tk.Tk):
             result = finalize_cycle_time_study(
                 config=self.cycle_time_config,
                 product_name=profile.name,
-                include_ecg=profile.include_ecg,
+                **profile.simulator_options(),
                 counts_by_key=state["counts"],
             )
             self.db.save_cycle_time_study(result)
@@ -3319,21 +3320,33 @@ class WearTestApp(tk.Tk):
         ).pack(side="left")
         tk.Label(
             notice,
-            text="These are project assumptions used to exercise the test software. They are not WHOOP production specifications.",
+            text="These are project assumptions used to exercise the test software. They are not production specifications from a wearable manufacturer.",
             bg="#EAF2F8", fg=self.TEXT, font=(self.font_family, 11),
         ).pack(side="left", padx=(12, 0))
 
         self.limit_vars = {
             "battery": tk.StringVar(),
+            "charge_current": tk.StringVar(),
+            "idle_current": tk.StringVar(),
+            "active_current": tk.StringVar(),
             "accel_bias": tk.StringVar(),
             "accel_noise": tk.StringVar(),
             "gyro_bias": tk.StringVar(),
             "gyro_noise": tk.StringVar(),
             "ppg_snr": tk.StringVar(),
             "ppg_sat": tk.StringVar(),
+            "spo2_snr": tk.StringVar(),
+            "spo2_ratio": tk.StringVar(),
+            "spo2_sat": tk.StringVar(),
             "temp_ref": tk.StringVar(),
             "temp_error": tk.StringVar(),
+            "ble_tx": tk.StringVar(),
+            "ble_per": tk.StringVar(),
+            "ble_freq": tk.StringVar(),
+            "haptic_rms": tk.StringVar(),
+            "haptic_freq": tk.StringVar(),
             "ecg_impedance": tk.StringVar(),
+            "ecg_waveform": tk.StringVar(),
         }
 
         tk.Label(
@@ -3389,12 +3402,20 @@ class WearTestApp(tk.Tk):
                 ).grid(row=index * 2 - 1, column=1, sticky="e", padx=(20, 0), pady=2)
 
         add_limit_card(
-            "Power", (("Battery voltage", "battery"),), 0, 0
+            "Power and charging",
+            (("Battery voltage", "battery"),
+             ("Charging current", "charge_current"),
+             ("Maximum idle current", "idle_current"),
+             ("Maximum active current", "active_current")),
+            0, 0,
         )
         add_limit_card(
             "Optical sensing",
             (("Minimum PPG signal-to-noise ratio", "ppg_snr"),
-             ("Maximum PPG saturation", "ppg_sat")),
+             ("Maximum PPG saturation", "ppg_sat"),
+             ("Minimum SpO₂ channel SNR", "spo2_snr"),
+             ("SpO₂ red/IR ratio", "spo2_ratio"),
+             ("Maximum SpO₂ saturation", "spo2_sat")),
             0, 1,
         )
         add_limit_card(
@@ -3406,13 +3427,29 @@ class WearTestApp(tk.Tk):
             1, 0, columnspan=2,
         )
         add_limit_card(
-            "Temperature",
-            (("Fixture reference", "temp_ref"),
-             ("Maximum error", "temp_error")),
+            "BLE / RF",
+            (("Transmit power", "ble_tx"),
+             ("Maximum packet error rate", "ble_per"),
+             ("Maximum frequency error", "ble_freq")),
             2, 0,
         )
         add_limit_card(
-            "ECG electrode path", (("Maximum impedance", "ecg_impedance"),), 2, 1
+            "Haptic motor",
+            (("Vibration level", "haptic_rms"),
+             ("Dominant frequency", "haptic_freq")),
+            2, 1,
+        )
+        add_limit_card(
+            "Temperature",
+            (("Fixture reference", "temp_ref"),
+             ("Maximum error", "temp_error")),
+            3, 0,
+        )
+        add_limit_card(
+            "ECG",
+            (("Maximum electrode impedance", "ecg_impedance"),
+             ("Injected waveform", "ecg_waveform")),
+            3, 1,
         )
 
     def _build_simulation_page(self, parent: ttk.Frame) -> None:
@@ -3446,12 +3483,22 @@ class WearTestApp(tk.Tk):
         self.fault_vars: dict[str, tk.BooleanVar] = {}
         faults = (
             ("battery_low", "Low battery voltage"),
+            ("charging_current_low", "Low charging current"),
+            ("idle_current_high", "High idle current"),
+            ("active_current_high", "High active current"),
             ("accel_bias", "Accelerometer offset"),
             ("gyro_bias", "Gyroscope offset"),
-            ("ppg_low_snr", "Weak or noisy optical response"),
-            ("ppg_saturation", "Optical channel saturation"),
+            ("ppg_low_snr", "Weak or noisy PPG response"),
+            ("ppg_saturation", "PPG channel saturation"),
+            ("spo2_low_snr", "Weak or noisy SpO₂ channels"),
+            ("spo2_ratio_error", "SpO₂ red/IR ratio error"),
+            ("spo2_saturation", "SpO₂ optical saturation"),
             ("skin_temp_offset", "Temperature sensor offset"),
+            ("ble_rf_fault", "BLE/RF functional fault"),
+            ("haptic_weak", "Weak haptic motor"),
+            ("haptic_frequency_shift", "Haptic frequency shift"),
             ("ecg_high_impedance", "High ECG electrode-path impedance"),
+            ("ecg_waveform_distortion", "Distorted ECG waveform response"),
         )
         grid = tk.Frame(card, bg=self.PANEL)
         grid.pack(fill="x")
@@ -3459,7 +3506,7 @@ class WearTestApp(tk.Tk):
             variable = tk.BooleanVar(value=False)
             self.fault_vars[key] = variable
             ttk.Checkbutton(grid, text=label, variable=variable).grid(
-                row=index // 2, column=index % 2, sticky="w", padx=(0, 60), pady=7
+                row=index // 3, column=index % 3, sticky="w", padx=(0, 34), pady=7
             )
         ttk.Button(card, text="Clear all defects", style="Secondary.TButton", command=self._clear_faults).pack(anchor="w", pady=(16, 0))
 
@@ -3576,15 +3623,22 @@ class WearTestApp(tk.Tk):
             return
 
         choices = (
-            "none", "battery_low", "accel_bias", "gyro_bias",
-            "ppg_low_snr", "ppg_saturation", "skin_temp_offset",
-            "ecg_high_impedance",
+            "none", "battery_low", "charging_current_low", "idle_current_high",
+            "active_current_high", "accel_bias", "gyro_bias", "ppg_low_snr",
+            "ppg_saturation", "spo2_low_snr", "spo2_ratio_error", "spo2_saturation",
+            "skin_temp_offset", "ble_rf_fault", "haptic_weak",
+            "haptic_frequency_shift", "ecg_high_impedance", "ecg_waveform_distortion",
+        )
+        demo_profile = self._product_profile(
+            "Wearable + ECG" if "Wearable + ECG" in self.product_profiles_by_name
+            else self.product_profiles[0].name
         )
         self._batch_state = {
             "count": count,
             "index": 0,
             "choices": choices,
-            "weights": (90.0, 1.5, 1.5, 2.0, 2.0, 1.0, 1.0, 1.0),
+            "weights": (84.0,) + (1.0,) * (len(choices) - 1),
+            "profile": demo_profile,
             "rng": random.Random(20260923 + count),
             "stations": ("ATE-01", "ATE-02", "ATE-03"),
             "batch_tag": datetime.now().strftime("%Y%m%d-%H%M%S"),
@@ -3646,8 +3700,12 @@ class WearTestApp(tk.Tk):
         if fault_name != "none":
             fault_values[fault_name] = True
 
+        profile = state["profile"]
         records = self.simulator.acquire(
-            device_id, station_id, faults=FaultProfile(**fault_values), include_ecg=True
+            device_id,
+            station_id,
+            faults=FaultProfile(**fault_values),
+            **profile.simulator_options(),
         )
         raw_path = self.records_dir / f"{records[0].session_id}.jsonl"
 
@@ -3665,9 +3723,11 @@ class WearTestApp(tk.Tk):
         )
         received = read_jsonl(raw_path, verify_checksum=True)
         self.transport.send_many(received)
-        disposition = self.engine.evaluate(received, require_ecg=True)
+        disposition = self.engine.evaluate(
+            received, **profile.evaluation_requirements()
+        )
         self.db.save_disposition(
-            disposition, station_id=station_id, product_variant="Wearable + ECG",
+            disposition, station_id=station_id, product_variant=profile.name,
             raw_record_path=str(raw_path),
         )
         if disposition.passed:
@@ -3837,13 +3897,12 @@ class WearTestApp(tk.Tk):
         try:
             faults = FaultProfile(**{key: variable.get() for key, variable in self.fault_vars.items()})
             records = self.simulator.acquire(
-                device_id, station_id, faults=faults, include_ecg=profile.include_ecg
+                device_id, station_id, faults=faults, **profile.simulator_options()
             )
             disposition = self._evaluate_records(
                 records,
                 station_id=station_id,
-                product_variant=profile.name,
-                require_ecg=profile.include_ecg,
+                product_profile=profile,
                 status_label=self.overall_label,
                 status_var=self.overall_var,
                 detail_var=self.overall_detail_var,
@@ -3924,13 +3983,12 @@ class WearTestApp(tk.Tk):
                 device_id,
                 station_id,
                 faults=state["faults"],
-                include_ecg=profile.include_ecg,
+                **profile.simulator_options(),
             )
             disposition = self._evaluate_records(
                 records,
                 station_id=station_id,
-                product_variant=profile.name,
-                require_ecg=profile.include_ecg,
+                product_profile=profile,
                 status_label=self.overall_label,
                 status_var=self.overall_var,
                 detail_var=self.overall_detail_var,
@@ -4013,8 +4071,7 @@ class WearTestApp(tk.Tk):
             self._evaluate_records(
                 records,
                 station_id=records[0].station_id,
-                product_variant=profile.name,
-                require_ecg=profile.include_ecg,
+                product_profile=profile,
                 status_label=self.external_overall_label,
                 status_var=self.external_overall_var,
                 detail_var=self.external_detail_var,
@@ -4031,8 +4088,7 @@ class WearTestApp(tk.Tk):
         records: list[MeasurementRecord],
         *,
         station_id: str,
-        product_variant: str,
-        require_ecg: bool,
+        product_profile: ProductProfile,
         status_label: ttk.Label,
         status_var: tk.StringVar,
         detail_var: tk.StringVar,
@@ -4043,8 +4099,7 @@ class WearTestApp(tk.Tk):
         Args:
             records: Canonical records from simulation or an external adapter.
             station_id: Station identifier stored with production traceability.
-            product_variant: Product configuration associated with this test.
-            require_ecg: Whether the selected product profile requires ECG data.
+            product_profile: Configured product features and required checks.
             status_label: GUI status label styled after evaluation.
             status_var: GUI variable for the primary result message.
             detail_var: GUI variable for supporting result text.
@@ -4061,11 +4116,13 @@ class WearTestApp(tk.Tk):
         # Re-reading the file makes checksum and sequence validation part of both paths.
         received = read_jsonl(raw_path, verify_checksum=True)
         primary_count, spooled_count = self.transport.send_many(received)
-        disposition = self.engine.evaluate(received, require_ecg=require_ecg)
+        disposition = self.engine.evaluate(
+            received, **product_profile.evaluation_requirements()
+        )
         self.db.save_disposition(
             disposition,
             station_id=station_id,
-            product_variant=product_variant,
+            product_variant=product_profile.name,
             raw_record_path=str(raw_path),
         )
         self.last_disposition = disposition
@@ -4328,15 +4385,27 @@ class WearTestApp(tk.Tk):
         specs = self.engine.specs
         values = {
             "battery": f"{specs.battery_voltage_min_v:.2f} to {specs.battery_voltage_max_v:.2f} V",
+            "charge_current": f"{specs.charging_current_min_ma:.0f} to {specs.charging_current_max_ma:.0f} mA",
+            "idle_current": f"≤ {specs.idle_current_max_ma:.2f} mA",
+            "active_current": f"≤ {specs.active_current_max_ma:.1f} mA",
             "accel_bias": f"≤ {specs.accel_axis_bias_max_g:.3f} g",
             "accel_noise": f"≤ {specs.accel_noise_rms_max_g:.3f} g RMS",
-            "gyro_bias": f"≤ {specs.gyro_bias_max_dps:.2f} deg/s",
-            "gyro_noise": f"≤ {specs.gyro_noise_rms_max_dps:.2f} deg/s RMS",
+            "gyro_bias": f"≤ {specs.gyro_bias_max_dps:.2f} °/s",
+            "gyro_noise": f"≤ {specs.gyro_noise_rms_max_dps:.2f} °/s RMS",
             "ppg_snr": f"≥ {specs.ppg_snr_min_db:.1f} dB",
             "ppg_sat": f"≤ {100 * specs.ppg_saturation_max_fraction:.1f}%",
+            "spo2_snr": f"red ≥ {specs.spo2_red_snr_min_db:.1f} dB; IR ≥ {specs.spo2_ir_snr_min_db:.1f} dB",
+            "spo2_ratio": f"{specs.spo2_ratio_reference:.2f} ± {specs.spo2_ratio_tolerance:.2f}",
+            "spo2_sat": f"≤ {100 * specs.spo2_saturation_max_fraction:.1f}%",
             "temp_ref": f"{specs.skin_temp_reference_c:.1f} °C",
             "temp_error": f"± {specs.skin_temp_error_max_c:.2f} °C",
+            "ble_tx": f"{specs.ble_tx_power_min_dbm:.1f} to {specs.ble_tx_power_max_dbm:.1f} dBm",
+            "ble_per": f"≤ {specs.ble_packet_error_rate_max_percent:.1f}%",
+            "ble_freq": f"≤ {specs.ble_frequency_error_max_khz:.0f} kHz absolute",
+            "haptic_rms": f"{specs.haptic_rms_min_g:.2f} to {specs.haptic_rms_max_g:.2f} g RMS",
+            "haptic_freq": f"{specs.haptic_frequency_reference_hz:.0f} ± {specs.haptic_frequency_tolerance_hz:.0f} Hz",
             "ecg_impedance": f"≤ {specs.ecg_electrode_impedance_max_kohm:.0f} kΩ",
+            "ecg_waveform": f"{specs.ecg_amplitude_min_mv:.2f} to {specs.ecg_amplitude_max_mv:.2f} mV; correlation ≥ {specs.ecg_correlation_min:.2f}",
         }
         for key, value in values.items():
             self.limit_vars[key].set(value)

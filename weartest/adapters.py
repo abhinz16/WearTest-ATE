@@ -40,7 +40,7 @@ class DataAdapter(ABC):
 
     @abstractmethod
     def convert(self, source: str | Path, **context: Any) -> list[MeasurementRecord]:
-        """Convert one source file into WearTest Exchange records.
+        """Convert one source file into standardized measurement records.
 
         Args:
             source: Path to the source acquisition file.
@@ -74,7 +74,7 @@ class ChannelMapping:
 
 
 class WideCsvAdapter(DataAdapter):
-    """Convert a typical wide acquisition CSV into WearTest Exchange records.
+    """Convert a typical wide acquisition CSV into standardized measurement records.
 
     Each mapped signal column becomes one canonical measurement record. Source
     units are explicit and may be converted to the canonical units expected by
@@ -227,7 +227,7 @@ class WideCsvAdapter(DataAdapter):
 
 
 class LabViewTdmsAdapter(DataAdapter):
-    """Convert selected NI/LabVIEW TDMS channels into WearTest Exchange records.
+    """Convert selected NI/LabVIEW TDMS channels into standardized measurement records.
 
     Args:
         channel_map: Mapping from ``(group, channel)`` source paths to canonical
@@ -508,7 +508,7 @@ class AdapterRegistry:
 
 
 class ExternalDataImporter:
-    """Convert user-supplied acquisitions into WearTest Exchange records.
+    """Convert user-supplied acquisitions into standardized measurement records.
 
     Built-in CSV and TDMS converters are always available. Additional converters
     can be discovered from ``user_adapters`` without modifying this class.
@@ -537,7 +537,7 @@ class ExternalDataImporter:
             Mapping from format name to user-facing display name.
         """
 
-        formats = {"jsonl": "WearTest Exchange JSONL"}
+        formats = {"jsonl": "Standardized JSONL"}
         for name, adapter_type in self.registry.formats().items():
             formats[name] = adapter_type.display_name
         return formats

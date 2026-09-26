@@ -6,6 +6,21 @@
       "source_unit": "mV",
       "target_unit": "V"
     },
+    "charging_current_A": {
+      "measurement": "charging_current",
+      "source_unit": "A",
+      "target_unit": "mA"
+    },
+    "idle_current_mA": {
+      "measurement": "idle_current",
+      "source_unit": "mA",
+      "target_unit": "mA"
+    },
+    "active_current_mA": {
+      "measurement": "active_current",
+      "source_unit": "mA",
+      "target_unit": "mA"
+    },
     "accel_x_mps2": {
       "measurement": "accel_x",
       "source_unit": "m/s^2",
@@ -36,20 +51,55 @@
       "source_unit": "rad/s",
       "target_unit": "deg/s"
     },
-    "ppg": {
+    "ppg_optical": {
       "measurement": "ppg_optical",
+      "source_unit": "normalized",
+      "target_unit": "normalized"
+    },
+    "spo2_red_optical": {
+      "measurement": "spo2_red_optical",
+      "source_unit": "normalized",
+      "target_unit": "normalized"
+    },
+    "spo2_ir_optical": {
+      "measurement": "spo2_ir_optical",
       "source_unit": "normalized",
       "target_unit": "normalized"
     },
     "temperature_c": {
       "measurement": "skin_temperature",
-      "source_unit": "degC",
-      "target_unit": "degC"
+      "source_unit": "°C",
+      "target_unit": "°C"
+    },
+    "ble_tx_power_dbm": {
+      "measurement": "ble_tx_power",
+      "source_unit": "dBm",
+      "target_unit": "dBm"
+    },
+    "ble_per_fraction": {
+      "measurement": "ble_packet_error_rate",
+      "source_unit": "fraction",
+      "target_unit": "%"
+    },
+    "ble_frequency_error_hz": {
+      "measurement": "ble_frequency_error",
+      "source_unit": "Hz",
+      "target_unit": "kHz"
+    },
+    "haptic_accel_g": {
+      "measurement": "haptic_vibration",
+      "source_unit": "g",
+      "target_unit": "g"
     },
     "ecg_impedance_ohm": {
       "measurement": "ecg_electrode_impedance",
       "source_unit": "ohm",
       "target_unit": "kohm"
+    },
+    "ecg_waveform_mV": {
+      "measurement": "ecg_waveform",
+      "source_unit": "mV",
+      "target_unit": "mV"
     }
   }
 }

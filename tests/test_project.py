@@ -40,6 +40,9 @@ def test_crc_detects_changed_data(tmp_path: Path) -> None:
 def test_unit_conversion() -> None:
     """Convert common acquisition units into WearTest canonical engineering units."""
     assert convert_values([4050], "mV", "V") == [4.05]
+    assert convert_values([0.260], "A", "mA") == pytest.approx([260.0])
+    assert convert_values([0.002], "fraction", "%") == pytest.approx([0.2])
+    assert convert_values([8000.0], "Hz", "kHz") == pytest.approx([8.0])
     assert convert_values([9.80665], "m/s^2", "g") == pytest.approx([1.0])
     assert convert_values([math.pi], "rad/s", "deg/s") == pytest.approx([180.0])
 
@@ -57,7 +60,9 @@ def test_good_device_passes_and_gyro_fault_fails() -> None:
 
 
 def test_external_csv_reaches_same_test_engine() -> None:
-    """Send mapped external CSV data through the same acceptance engine as simulation."""
+    """Send a full mapped external acquisition through the configured product profile."""
+    from weartest.test_engine import load_product_profiles
+
     root = Path(__file__).resolve().parents[1]
     importer = ExternalDataImporter(user_adapter_dir=root / "user_adapters")
     records = importer.import_file(
@@ -65,8 +70,75 @@ def test_external_csv_reaches_same_test_engine() -> None:
         device_id="DUT-CSV", station_id="ATE-2", source_format="csv",
         mapping_path=root / "examples" / "external_device_mapping.json",
     )
-    assert records
-    assert ManufacturingTestEngine().evaluate(records).passed
+    profiles = {profile.name: profile for profile in load_product_profiles()}
+    result = ManufacturingTestEngine().evaluate(
+        records, **profiles["Wearable + ECG"].evaluation_requirements()
+    )
+    assert len(records) == 20
+    assert result.passed
+
+
+@pytest.mark.parametrize(
+    ("fault_name", "failure_code"),
+    (
+        ("charging_current_low", "POWER_CHARGING_CURRENT_OUT_OF_SPEC"),
+        ("idle_current_high", "POWER_IDLE_CURRENT_HIGH"),
+        ("active_current_high", "POWER_ACTIVE_CURRENT_HIGH"),
+        ("spo2_low_snr", "SPO2_OPTICAL_PATH_FAIL"),
+        ("spo2_ratio_error", "SPO2_OPTICAL_PATH_FAIL"),
+        ("spo2_saturation", "SPO2_OPTICAL_PATH_FAIL"),
+        ("ble_rf_fault", "BLE_RF_FUNCTIONAL_FAIL"),
+        ("haptic_weak", "HAPTIC_VIBRATION_OUT_OF_SPEC"),
+        ("haptic_frequency_shift", "HAPTIC_VIBRATION_OUT_OF_SPEC"),
+        ("ecg_waveform_distortion", "ECG_WAVEFORM_RESPONSE_FAIL"),
+    ),
+)
+def test_extended_wearable_faults_are_detected(fault_name: str, failure_code: str) -> None:
+    """Verify each newly added bench-verification path can reject a known fault.
+
+    Args:
+        fault_name: FaultProfile field enabled for the simulated DUT.
+        failure_code: Expected manufacturing failure code.
+    """
+    from weartest.test_engine import load_product_profiles
+
+    profiles = {profile.name: profile for profile in load_product_profiles()}
+    profile = profiles["Wearable + ECG"]
+    simulator = WearableSimulator(rng_seed=222)
+    engine = ManufacturingTestEngine()
+    fault = FaultProfile(**{fault_name: True})
+    records = simulator.acquire(
+        "DUT-EXTENDED", "ATE-01", faults=fault, **profile.simulator_options()
+    )
+    result = engine.evaluate(records, **profile.evaluation_requirements())
+    assert not result.passed
+    assert failure_code in result.failure_codes
+
+
+def test_full_wearable_profile_exercises_all_extended_paths() -> None:
+    """A healthy full-feature wearable should pass every configured test group."""
+    from weartest.test_engine import load_product_profiles
+
+    profiles = {profile.name: profile for profile in load_product_profiles()}
+    profile = profiles["Wearable + ECG"]
+    records = WearableSimulator(rng_seed=223).acquire(
+        "DUT-FULL", "ATE-01", **profile.simulator_options()
+    )
+    result = ManufacturingTestEngine().evaluate(
+        records, **profile.evaluation_requirements()
+    )
+    names = {step.name for step in result.results}
+    assert result.passed
+    assert {
+        "Charging current",
+        "Idle current",
+        "Active current",
+        "SpO₂ red/IR optical paths",
+        "BLE/RF functional",
+        "Haptic motor vibration",
+        "ECG electrode path",
+        "ECG waveform response",
+    }.issubset(names)
 
 
 def test_storage_fallback_and_database(tmp_path: Path) -> None:
@@ -217,6 +289,16 @@ def test_golden_unit_detects_station_drift_and_tracks_health(tmp_path: Path) -> 
         simulator.acquire_golden(config, "ATE-03", 1), check_number=1
     )
     assert first.status == "Healthy"
+    assert len(first.metrics) == 21
+    assert {metric.key for metric in first.metrics}.issuperset(
+        {
+            "charging_current",
+            "spo2_red_amplitude",
+            "ble_tx_power",
+            "haptic_rms",
+            "ecg_waveform_amplitude",
+        }
+    )
 
     warning = evaluator.evaluate(
         simulator.acquire_golden(config, "ATE-03", 5), check_number=5
@@ -261,27 +343,37 @@ def test_golden_unit_healthy_station_stays_within_reference_limits() -> None:
 
 
 def test_product_profiles_are_configurable_and_ecg_requirement_is_enforced() -> None:
-    """Configured product profiles should drive which measurements are required."""
+    """Configured product profiles should drive every optional measurement requirement."""
 
     from weartest.test_engine import load_product_profiles
 
     profiles = {profile.name: profile for profile in load_product_profiles()}
-    assert profiles["Wearable"].include_ecg is False
-    assert profiles["Wearable + ECG"].include_ecg is True
+    base_profile = profiles["Wearable"]
+    ecg_profile = profiles["Wearable + ECG"]
+    assert base_profile.include_spo2
+    assert base_profile.include_power_current
+    assert base_profile.include_ble_rf
+    assert base_profile.include_haptic
+    assert base_profile.include_ecg is False
+    assert base_profile.include_ecg_waveform is False
+    assert ecg_profile.include_ecg is True
+    assert ecg_profile.include_ecg_waveform is True
 
     simulator = WearableSimulator(rng_seed=808)
     engine = ManufacturingTestEngine()
-    no_ecg_records = simulator.acquire(
-        "DUT-PROFILE", "ATE-01", include_ecg=False
+    base_records = simulator.acquire(
+        "DUT-PROFILE", "ATE-01", **base_profile.simulator_options()
     )
+    assert engine.evaluate(
+        base_records, **base_profile.evaluation_requirements()
+    ).passed
 
-    base_result = engine.evaluate(no_ecg_records, require_ecg=False)
-    assert base_result.passed
-
-    ecg_result = engine.evaluate(no_ecg_records, require_ecg=True)
+    ecg_result = engine.evaluate(
+        base_records, **ecg_profile.evaluation_requirements()
+    )
     assert not ecg_result.passed
     assert "ECG_REQUIRED_MEASUREMENT_MISSING" in ecg_result.failure_codes
-
+    assert "ECG_WAVEFORM_REQUIRED_MEASUREMENT_MISSING" in ecg_result.failure_codes
 
 def test_crossed_grr_separates_measurement_and_part_variation(tmp_path: Path) -> None:
     """A balanced study should produce finite GR&R components and persist them.
@@ -389,6 +481,39 @@ def test_grr_detects_worse_station_reproducibility_after_drift() -> None:
     assert drifted.percent_grr > baseline.percent_grr
 
 
+def test_grr_supports_new_power_rf_haptic_and_ecg_metrics() -> None:
+    """New scalar verification paths should be available to measurement-system studies."""
+    from weartest.grr import load_grr_configuration
+    from weartest.test_engine import load_golden_unit_configuration
+
+    grr_config = load_grr_configuration()
+    golden_config = load_golden_unit_configuration()
+    expected = {
+        "charging_current",
+        "spo2_red_amplitude",
+        "spo2_ir_amplitude",
+        "ble_tx_power",
+        "ble_packet_error_rate",
+        "ble_frequency_error",
+        "haptic_rms",
+        "haptic_frequency",
+        "ecg_waveform_amplitude",
+    }
+    assert expected.issubset(grr_config.metrics)
+
+    simulator = WearableSimulator(rng_seed=903)
+    for metric_key in sorted(expected):
+        metric = grr_config.metrics[metric_key]
+        measured = simulator.measure_grr_reference(
+            metric=metric,
+            reference_value=metric.nominal,
+            station_id="ATE-01",
+            golden_config=golden_config,
+            station_check_number=1,
+        )
+        assert math.isfinite(measured)
+
+
 def test_cycle_time_optimizer_rejects_coverage_loss_and_selects_fast_validated_sequence(tmp_path: Path) -> None:
     """Faster sequences should be accepted only when simulated defect coverage is retained.
 
@@ -408,23 +533,28 @@ def test_cycle_time_optimizer_rejects_coverage_loss_and_selects_fast_validated_s
     config = load_cycle_time_configuration()
     simulator = WearableSimulator(rng_seed=config.rng_seed)
     engine = ManufacturingTestEngine()
-    fault_profiles = validation_fault_profiles(include_ecg=True)
+    from weartest.test_engine import load_product_profiles
+
+    profile = {item.name: item for item in load_product_profiles()}["Wearable + ECG"]
+    fault_profiles = validation_fault_profiles(**profile.simulator_options())
     candidates = (config.baseline, *config.candidates)
     counts = {candidate.key: CandidateValidationCounts() for candidate in candidates}
 
     for index in range(80):
         fault = fault_profiles[index % len(fault_profiles)]
         records = simulator.acquire(
-            f"CYCLE-{index:03d}", "ATE-CYCLE", faults=fault, include_ecg=True
+            f"CYCLE-{index:03d}", "ATE-CYCLE", faults=fault, **profile.simulator_options()
         )
-        baseline = engine.evaluate(records, require_ecg=True)
+        baseline = engine.evaluate(records, **profile.evaluation_requirements())
         for candidate in candidates:
             candidate_records = (
                 records
                 if candidate.baseline
                 else truncate_records_for_candidate(records, candidate)
             )
-            disposition = engine.evaluate(candidate_records, require_ecg=True)
+            disposition = engine.evaluate(
+                candidate_records, **profile.evaluation_requirements()
+            )
             counts[candidate.key].record(
                 defective=is_faulty(fault),
                 baseline_failed=not baseline.passed,
@@ -433,9 +563,9 @@ def test_cycle_time_optimizer_rejects_coverage_loss_and_selects_fast_validated_s
 
     result = finalize_cycle_time_study(
         config=config,
-        product_name="Wearable + ECG",
-        include_ecg=True,
+        product_name=profile.name,
         counts_by_key=counts,
+        **profile.simulator_options(),
     )
     by_name = {item.candidate.name: item for item in result.candidates}
 
@@ -463,16 +593,32 @@ def test_cycle_time_candidate_windows_actually_reduce_waveform_samples() -> None
 
     config = load_cycle_time_configuration()
     fastest = min(config.candidates, key=lambda item: item.ppg_window_s)
+    from weartest.test_engine import load_product_profiles
+
+    profile = {item.name: item for item in load_product_profiles()}["Wearable + ECG"]
     records = WearableSimulator(rng_seed=17).acquire(
-        "DUT-CYCLE", "ATE-01", faults=FaultProfile(ppg_saturation=True), include_ecg=True
+        "DUT-CYCLE",
+        "ATE-01",
+        faults=FaultProfile(ppg_saturation=True),
+        **profile.simulator_options(),
     )
     shortened = truncate_records_for_candidate(records, fastest)
     original_ppg = next(record for record in records if record.measurement == "ppg_optical")
     shortened_ppg = next(record for record in shortened if record.measurement == "ppg_optical")
+    original_spo2 = next(
+        record for record in records if record.measurement == "spo2_red_optical"
+    )
+    shortened_spo2 = next(
+        record for record in shortened if record.measurement == "spo2_red_optical"
+    )
     original_accel = next(record for record in records if record.measurement == "accel_x")
     shortened_accel = next(record for record in shortened if record.measurement == "accel_x")
 
     assert len(shortened_ppg.values) < len(original_ppg.values)
+    assert len(shortened_spo2.values) < len(original_spo2.values)
     assert len(shortened_accel.values) < len(original_accel.values)
     assert len(shortened_ppg.values) == int(fastest.ppg_window_s * original_ppg.sample_rate_hz)
+    assert len(shortened_spo2.values) == int(
+        fastest.ppg_window_s * original_spo2.sample_rate_hz
+    )
     assert len(shortened_accel.values) == int(fastest.imu_window_s * original_accel.sample_rate_hz)
